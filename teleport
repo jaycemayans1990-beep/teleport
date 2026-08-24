@@ -31,7 +31,7 @@ local RemoteHandler = {
     end
 }
 
--- TELEPORT FUNCTION (วาร์ปไปด้านหลัง และหันหน้ามองศัตรู)
+-- TELEPORT FUNCTION (วาร์ปไปด้านหลัง และล็อกหน้าตรงเป๊ะไม่เอียง)
 local function TeleportBehindOpponent(targetName)
     local targetPlayer = Players:FindFirstChild(targetName)
     if not targetPlayer then return end
@@ -45,12 +45,15 @@ local function TeleportBehindOpponent(targetName)
         local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
 
         if localRoot and targetRoot and targetHum and targetHum.Health > 0 then
-            -- คำนวณตำแหน่งด้านหลังตามทิศทางที่ศัตรูกำลังมอง (-LookVector)
-            local behindPos = targetRoot.Position - (targetRoot.CFrame.LookVector * BehindDistance)
-            behindPos = Vector3.new(behindPos.X, targetRoot.Position.Y, behindPos.Z) -- รักษาระดับความสูง
+            -- ดึงทิศทางมองของศัตรูเฉพาะแนวราบ (ตัดแกน Y ทิ้งเพื่อกันตัวเอียง/เงย)
+            local flatLook = Vector3.new(targetRoot.CFrame.LookVector.X, 0, targetRoot.CFrame.LookVector.Z).Unit
             
-            -- สร้าง CFrame ให้ไปอยู่ข้างหลัง และหันหน้ามองไปที่ตัวศัตรู
-            local targetCFrame = CFrame.new(behindPos, targetRoot.Position)
+            -- คำนวณตำแหน่งด้านหลังศัตรูในแนวราบ
+            local behindPos = targetRoot.Position - (flatLook * BehindDistance)
+            behindPos = Vector3.new(behindPos.X, targetRoot.Position.Y, behindPos.Z)
+            
+            -- สร้าง CFrame ให้อยู่ข้างหลัง และบังคับหันหน้าตรงขนานไปกับศัตรูเป๊ะๆ
+            local targetCFrame = CFrame.lookAt(behindPos, behindPos + flatLook, Vector3.new(0, 1, 0))
 
             task.spawn(function()
                 localChar:PivotTo(targetCFrame)
@@ -302,7 +305,7 @@ TeleportBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
 TeleportBtn.Position = UDim2.new(0.05, 0, 0.72, 0)
 TeleportBtn.Size = UDim2.new(0.9, 0, 0, 35)
 TeleportBtn.Font = Enum.Font.GothamBold
-TeleportBtn.Text = "TELEPORT (หลังศัตรู & หันหน้ามอง)"
+TeleportBtn.Text = "TELEPORT (หลังศัตรู & ล็อกหน้าตรง)"
 TeleportBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 TeleportBtn.TextSize = 11
 
