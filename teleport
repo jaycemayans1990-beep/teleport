@@ -39,7 +39,11 @@ local function teleport()
 	local target = pickEnemy()
 	if not target then notify("ไม่มีศัตรู") return end
 	local spot = target.CFrame * CFrame.new(0, 0, DIST) -- local +Z = หลังเป้า
-	myRoot.CFrame = CFrame.lookAt(spot.Position, target.Position)
+	-- หันหน้าไปทางเดียวกับศัตรู = เพ่งไปที่หลังหัวศัตรู (ตัด pitch ของเป้าออก กันตัวเอียง)
+	local lv = target.CFrame.LookVector
+	local face = Vector3.new(lv.X, 0, lv.Z)
+	face = face.Magnitude > 0.05 and face.Unit or Vector3.new(0, 0, -1)
+	myRoot.CFrame = CFrame.lookAt(spot.Position, spot.Position + face)
 end
 
 -- UI -------------------------------------------------------------
@@ -78,42 +82,37 @@ lockBadge.Text = "🔓"
 lockBadge.Parent = box
 Instance.new("UICorner", lockBadge).CornerRadius = UDim.new(1, 0)
 
--- drag (whole box) -----------------------------------------------
+-- drag + tap: เริ่มจับที่ tp (ปุ่มกิน touch ก่อน frame ที่อยู่ใต้เสมอ)
+-- ขยับ/ปล่อยผ่าน UserInputService → ลากต่อได้แม้นิ้วเลื่อนออกนอกกล่อง
+local UIS = game:GetService("UserInputService")
+
 local locked = false
-local dragging = false
-local dragStart, startPos
+local dragInput, dragStart, startPos
 
 local isPress = function(io)
 	return io.UserInputType == Enum.UserInputType.Touch
 		or io.UserInputType == Enum.UserInputType.MouseButton1
 end
 
-box.InputBegan:Connect(function(io)
+tp.InputBegan:Connect(function(io)
 	if isPress(io) then
-		dragging, dragStart, startPos = true, io.Position, box.Position
+		dragInput, dragStart, startPos = io, io.Position, box.Position
 	end
 end)
 
-box.InputChanged:Connect(function(io)
-	if not dragging or locked then return end
+UIS.InputChanged:Connect(function(io)
+	if io ~= dragInput or locked then return end
 	local d = io.Position - dragStart
 	box.Position = startPos + UDim2.fromOffset(d.X, d.Y)
 end)
 
-box.InputEnded:Connect(function(io)
-	if isPress(io) then dragging = false end
-end)
-
--- tap = teleport (release within TAP_SLOP px) ---------------------
-local pressPos
-tp.InputBegan:Connect(function(io)
-	if isPress(io) then pressPos = io.Position end
-end)
-tp.InputEnded:Connect(function(io)
-	if not pressPos then return end
-	local tap = (io.Position - pressPos).Magnitude <= TAP_SLOP
-	pressPos = nil
-	if tap then teleport() end
+UIS.InputEnded:Connect(function(io)
+	if io ~= dragInput then return end
+	dragInput = nil
+	-- แตะ (ขยับ ≤ TAP_SLOP) = เทเลพอร์ต · ทำงานแม้ตอนล็อก (ล็อกกั้นแค่การลาก)
+	if (io.Position - dragStart).Magnitude <= TAP_SLOP then
+		teleport()
+	end
 end)
 
 lockBadge.Activated:Connect(function()
