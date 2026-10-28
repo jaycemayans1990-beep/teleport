@@ -1,330 +1,124 @@
+-- language: Luau (Roblox executor script), file: behind_tp.lua, target: Delta mobile
+-- Tap TP = teleport behind a random enemy (10 studs, facing their back) · drag box to move · badge = drag-lock
+
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local Teams = game:GetService("Teams")
+local CoreGui = game:GetService("CoreGui")
+local StarterGui = game:GetService("StarterGui")
 
--- 1. ลบ UI เก่าทิ้งก่อนรันใหม่
-local parentGui = (gethui and gethui()) or game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
-if parentGui:FindFirstChild("IXNativeUI") then
-    parentGui.IXNativeUI:Destroy()
+local me = Players.LocalPlayer
+
+local DIST = 10      -- studs behind target
+local TAP_SLOP = 8   -- px of finger drift still counted as a tap (not a drag)
+
+local function notify(text)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", { Title = "BehindTP", Text = text, Duration = 2 })
+	end)
 end
 
--- 2. สร้าง ScreenGui หลัก
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "IXNativeUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = parentGui
-
--- ตัวแปรระบบ
-local SelectedPlayerName = ""
-local TeleportHeight = 500
-local FilterMode = "Enemy" -- เริ่มต้นที่ Enemy
-
--- REMOTE HANDLER
-local RemoteHandler = {
-    Remote = ReplicatedStorage:FindFirstChild("TeleportRemote") or ReplicatedStorage:FindFirstChildOfClass("RemoteEvent"),
-    SendLog = function(self, action, targetName, position)
-        if self.Remote then
-            pcall(function() self.Remote:FireServer(action, targetName, position) end)
-        end
-    end
-}
-
--- TELEPORT FUNCTION
-local function TeleportAboveOpponent(targetName)
-    local targetPlayer = Players:FindFirstChild(targetName)
-    if not targetPlayer then return end
-
-    local localChar = LocalPlayer.Character
-    local targetChar = targetPlayer.Character
-
-    if localChar and targetChar then
-        local localRoot = localChar:FindFirstChild("HumanoidRootPart")
-        local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-        local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-
-        if localRoot and targetRoot and targetHum and targetHum.Health > 0 then
-            local targetPosition = targetRoot.CFrame * CFrame.new(0, TeleportHeight, 0)
-            task.spawn(function()
-                localChar:PivotTo(targetPosition)
-            end)
-            RemoteHandler:SendLog("Teleported", targetName, targetPosition.Position)
-        end
-    end
+local function pickEnemy()
+	local pool = {}
+	for _, plr in Players:GetPlayers() do
+		-- same named team = teammate; teamless/FFA games = everyone is an enemy
+		if plr ~= me and not (me.Team ~= nil and plr.Team == me.Team) then
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if hum and root and hum.Health > 0 then
+				pool[#pool + 1] = root
+			end
+		end
+	end
+	if #pool == 0 then return nil end
+	return pool[math.random(#pool)]
 end
 
--- ระบบลาก UI บนมือถือ (Touch Drag)
-local function makeDraggable(gui, handle)
-    local dragging, dragInput, dragStart, startPos
-    handle = handle or gui
-    
-    handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = gui.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-    
-    handle.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            local delta = input.Position - dragStart
-            gui.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
+local function teleport()
+	local myRoot = me.Character and me.Character:FindFirstChild("HumanoidRootPart")
+	if not myRoot then return end
+	local target = pickEnemy()
+	if not target then notify("ไม่มีศัตรู") return end
+	local spot = target.CFrame * CFrame.new(0, 0, DIST) -- local +Z = หลังเป้า
+	myRoot.CFrame = CFrame.lookAt(spot.Position, target.Position)
 end
 
--- =========================================================
--- [ UI CREATION ]
--- =========================================================
+-- UI -------------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = "BehindTP"
+gui.ResetOnSpawn = false
+gui.Parent = (gethui and gethui()) or CoreGui
 
--- ปุ่มลอยซ่อน/เปิด UI (Mobile Floating Button)
-local ToggleBtn = Instance.new("TextButton")
-local ToggleCorner = Instance.new("UICorner")
-local ToggleStroke = Instance.new("UIStroke")
+local box = Instance.new("Frame")
+box.Size = UDim2.fromOffset(44, 44)
+box.Position = UDim2.new(0.4, 0, 0.5, 0)
+box.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+box.BackgroundTransparency = 0.2
+box.BorderSizePixel = 0
+box.Active = true
+box.Parent = gui
+Instance.new("UICorner", box).CornerRadius = UDim.new(0, 10)
 
-ToggleBtn.Name = "IXToggleBtn"
-ToggleBtn.Parent = ScreenGui
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-ToggleBtn.Position = UDim2.new(0.05, 0, 0.2, 0)
-ToggleBtn.Size = UDim2.new(0, 50, 0, 50)
-ToggleBtn.Font = Enum.Font.GothamBold
-ToggleBtn.Text = "IX"
-ToggleBtn.TextColor3 = Color3.fromRGB(0, 225, 255)
-ToggleBtn.TextSize = 13
-ToggleBtn.Active = true
+local tp = Instance.new("TextButton")
+tp.Size = UDim2.fromScale(1, 1)
+tp.BackgroundTransparency = 1
+tp.Font = Enum.Font.GothamBold
+tp.TextSize = 15
+tp.TextColor3 = Color3.fromRGB(240, 240, 240)
+tp.Text = "TP"
+tp.Parent = box
 
-ToggleCorner.CornerRadius = UDim.new(1, 0)
-ToggleCorner.Parent = ToggleBtn
+local lockBadge = Instance.new("TextButton")
+lockBadge.Size = UDim2.fromOffset(18, 18)
+lockBadge.Position = UDim2.new(1, -8, 0, -8)
+lockBadge.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+lockBadge.BorderSizePixel = 0
+lockBadge.Font = Enum.Font.SourceSans
+lockBadge.TextSize = 12
+lockBadge.Text = "🔓"
+lockBadge.Parent = box
+Instance.new("UICorner", lockBadge).CornerRadius = UDim.new(1, 0)
 
-ToggleStroke.Parent = ToggleBtn
-ToggleStroke.Color = Color3.fromRGB(0, 225, 255)
-ToggleStroke.Thickness = 2
+-- drag (whole box) -----------------------------------------------
+local locked = false
+local dragging = false
+local dragStart, startPos
 
-makeDraggable(ToggleBtn)
-
--- หน้าต่างหลัก (Main Frame)
-local MainFrame = Instance.new("Frame")
-local MainCorner = Instance.new("UICorner")
-local MainStroke = Instance.new("UIStroke")
-local TitleBar = Instance.new("TextLabel")
-local SelectedLabel = Instance.new("TextLabel")
-
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-MainFrame.Position = UDim2.new(0.5, -130, 0.5, -170)
-MainFrame.Size = UDim2.new(0, 260, 0, 350)
-MainFrame.ClipsDescendants = true
-
-MainCorner.CornerRadius = UDim.new(0, 10)
-MainCorner.Parent = MainFrame
-
-MainStroke.Parent = MainFrame
-MainStroke.Color = Color3.fromRGB(0, 225, 255)
-MainStroke.Thickness = 1.5
-
-makeDraggable(MainFrame, TitleBar)
-
-TitleBar.Name = "TitleBar"
-TitleBar.Parent = MainFrame
-TitleBar.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-TitleBar.Size = UDim2.new(1, 0, 0, 35)
-TitleBar.Font = Enum.Font.GothamBold
-TitleBar.Text = "  IX Teleport"
-TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.TextSize = 13
-TitleBar.TextXAlignment = Enum.TextXAlignment.Left
-
-SelectedLabel.Parent = MainFrame
-SelectedLabel.Position = UDim2.new(0.05, 0, 0.11, 0)
-SelectedLabel.Size = UDim2.new(0.9, 0, 0, 18)
-SelectedLabel.Font = Enum.Font.Gotham
-SelectedLabel.Text = "เป้าหมาย: ยังไม่ได้เลือก"
-SelectedLabel.TextColor3 = Color3.fromRGB(0, 225, 255)
-SelectedLabel.TextSize = 11
-SelectedLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- ตัวกรองทีม (Filter Buttons) - เหลือแค่ 2 ปุ่ม
-local FilterFrame = Instance.new("Frame")
-local FilterLayout = Instance.new("UIListLayout")
-
-FilterFrame.Parent = MainFrame
-FilterFrame.BackgroundTransparency = 1
-FilterFrame.Position = UDim2.new(0.05, 0, 0.17, 0)
-FilterFrame.Size = UDim2.new(0.9, 0, 0, 25)
-
-FilterLayout.Parent = FilterFrame
-FilterLayout.FillDirection = Enum.FillDirection.Horizontal
-FilterLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-FilterLayout.Padding = UDim.new(0, 8)
-
-local filterButtons = {}
-
-local function createFilterBtn(text, mode)
-    local btn = Instance.new("TextButton")
-    local corner = Instance.new("UICorner")
-    
-    btn.Parent = FilterFrame
-    btn.Size = UDim2.new(0.45, 0, 1, 0)
-    btn.Font = Enum.Font.GothamBold
-    btn.Text = text
-    btn.TextSize = 10
-    btn.TextColor3 = (FilterMode == mode) and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-    btn.BackgroundColor3 = (FilterMode == mode) and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(40, 40, 50)
-    
-    corner.CornerRadius = UDim.new(0, 4)
-    corner.Parent = btn
-    
-    filterButtons[mode] = btn
-    
-    btn.MouseButton1Click:Connect(function()
-        FilterMode = mode
-        for m, b in pairs(filterButtons) do
-            b.BackgroundColor3 = (m == FilterMode) and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(40, 40, 50)
-            b.TextColor3 = (m == FilterMode) and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-        end
-        RefreshPlayers()
-    end)
+local isPress = function(io)
+	return io.UserInputType == Enum.UserInputType.Touch
+		or io.UserInputType == Enum.UserInputType.MouseButton1
 end
 
--- สร้างปุ่มแค่ 2 ปุ่ม (ศัตรู, ทีมเรา)
-createFilterBtn("ศัตรู", "Enemy")
-createFilterBtn("ทีมเรา", "Team")
-
--- กรอบรายชื่อผู้เล่น (Player List)
-local PlayerListScroll = Instance.new("ScrollingFrame")
-local UIListLayout = Instance.new("UIListLayout")
-
-PlayerListScroll.Parent = MainFrame
-PlayerListScroll.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-PlayerListScroll.Position = UDim2.new(0.05, 0, 0.26, 0)
-PlayerListScroll.Size = UDim2.new(0.9, 0, 0, 150)
-PlayerListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-PlayerListScroll.ScrollBarThickness = 4
-
-UIListLayout.Parent = PlayerListScroll
-UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-UIListLayout.Padding = UDim.new(0, 3)
-
--- ฟังก์ชันเช็กว่าอยู่ทีมเดียวกันหรือไม่
-local function IsSameTeam(player)
-    if player.Team ~= nil and LocalPlayer.Team ~= nil then
-        return player.Team == LocalPlayer.Team
-    end
-    return player.TeamColor == LocalPlayer.TeamColor
-end
-
-function RefreshPlayers()
-    for _, child in ipairs(PlayerListScroll:GetChildren()) do
-        if child:IsA("TextButton") then
-            child:Destroy()
-        end
-    end
-
-    local count = 0
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local sameTeam = IsSameTeam(player)
-            local show = false
-
-            if FilterMode == "Enemy" and not sameTeam then
-                show = true
-            elseif FilterMode == "Team" and sameTeam then
-                show = true
-            end
-
-            if show then
-                count = count + 1
-                local pBtn = Instance.new("TextButton")
-                local btnCorner = Instance.new("UICorner")
-
-                pBtn.Parent = PlayerListScroll
-                pBtn.BackgroundColor3 = sameTeam and Color3.fromRGB(30, 50, 35) or Color3.fromRGB(50, 30, 35)
-                pBtn.Size = UDim2.new(1, -6, 0, 28)
-                pBtn.Font = Enum.Font.Gotham
-                pBtn.Text = player.Name .. (sameTeam and " [ทีมเรา]" or " [ศัตรู]")
-                pBtn.TextColor3 = sameTeam and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
-                pBtn.TextSize = 11
-
-                btnCorner.CornerRadius = UDim.new(0, 4)
-                btnCorner.Parent = pBtn
-
-                pBtn.MouseButton1Click:Connect(function()
-                    SelectedPlayerName = player.Name
-                    SelectedLabel.Text = "เป้าหมาย: " .. player.Name
-                end)
-            end
-        end
-    end
-
-    PlayerListScroll.CanvasSize = UDim2.new(0, 0, 0, count * 31)
-    if count == 0 then
-        SelectedLabel.Text = "เป้าหมาย: ไม่พบผู้เล่นในโหมดนี้"
-    end
-end
-
--- ปุ่ม Teleport
-local TeleportBtn = Instance.new("TextButton")
-local TeleCorner = Instance.new("UICorner")
-
-TeleportBtn.Parent = MainFrame
-TeleportBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-TeleportBtn.Position = UDim2.new(0.05, 0, 0.72, 0)
-TeleportBtn.Size = UDim2.new(0.9, 0, 0, 35)
-TeleportBtn.Font = Enum.Font.GothamBold
-TeleportBtn.Text = "TELEPORT (500 Studs)"
-TeleportBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-TeleportBtn.TextSize = 12
-
-TeleCorner.CornerRadius = UDim.new(0, 6)
-TeleCorner.Parent = TeleportBtn
-
-TeleportBtn.MouseButton1Click:Connect(function()
-    if SelectedPlayerName ~= "" then
-        TeleportAboveOpponent(SelectedPlayerName)
-    else
-        SelectedLabel.Text = "เป้าหมาย: กรุณาเลือกคนก่อน!"
-    end
+box.InputBegan:Connect(function(io)
+	if isPress(io) then
+		dragging, dragStart, startPos = true, io.Position, box.Position
+	end
 end)
 
--- ปุ่ม Refresh
-local RefreshBtn = Instance.new("TextButton")
-local RefCorner = Instance.new("UICorner")
-
-RefreshBtn.Parent = MainFrame
-RefreshBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-RefreshBtn.Position = UDim2.new(0.05, 0, 0.84, 0)
-RefreshBtn.Size = UDim2.new(0.9, 0, 0, 30)
-RefreshBtn.Font = Enum.Font.Gotham
-RefreshBtn.Text = "Refresh Players List"
-RefreshBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-RefreshBtn.TextSize = 11
-
-RefCorner.CornerRadius = UDim.new(0, 6)
-RefCorner.Parent = RefreshBtn
-
-RefreshBtn.MouseButton1Click:Connect(function()
-    RefreshPlayers()
+box.InputChanged:Connect(function(io)
+	if not dragging or locked then return end
+	local d = io.Position - dragStart
+	box.Position = startPos + UDim2.fromOffset(d.X, d.Y)
 end)
 
--- สลับเปิด/ปิด UI ด้วยปุ่มลอย
-ToggleBtn.MouseButton1Click:Connect(function()
-    MainFrame.Visible = not MainFrame.Visible
+box.InputEnded:Connect(function(io)
+	if isPress(io) then dragging = false end
 end)
 
--- เริ่มโหลดรายชื่อ
-RefreshPlayers()
+-- tap = teleport (release within TAP_SLOP px) ---------------------
+local pressPos
+tp.InputBegan:Connect(function(io)
+	if isPress(io) then pressPos = io.Position end
+end)
+tp.InputEnded:Connect(function(io)
+	if not pressPos then return end
+	local tap = (io.Position - pressPos).Magnitude <= TAP_SLOP
+	pressPos = nil
+	if tap then teleport() end
+end)
+
+lockBadge.Activated:Connect(function()
+	locked = not locked
+	lockBadge.Text = locked and "🔒" or "🔓"
+end)
+
+print("[BehindTP] loaded")
