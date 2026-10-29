@@ -16,28 +16,55 @@ local function notify(text)
 	end)
 end
 
-local function pickEnemy()
-	local pool = {}
-	for _, plr in Players:GetPlayers() do
-		-- same named team = teammate; teamless/FFA games = everyone is an enemy
-		if plr ~= me and not (me.Team ~= nil and plr.Team == me.Team) then
-			local char = plr.Character
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			local root = char and char:FindFirstChild("HumanoidRootPart")
-			if hum and root and hum.Health > 0 then
-				pool[#pool + 1] = root
+local function pickTarget()
+	local cam = workspace.CurrentCamera
+	if not cam then return nil end
+
+	-- 1) raycast จากกลางจอ (จุดเล็ง) หาตัวละครตรง ๆ
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { me.Character }
+	local hit = workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * 1000, rayParams)
+	local model = hit and hit.Instance:FindFirstAncestorOfClass("Model")
+
+	-- 2) ไม่โดนตัวละคร = เอาศัตรูที่อยู่ใกล้จุดเล็งที่สุดบนจอแทน
+	if not (model and model:FindFirstChildOfClass("Humanoid")) then
+		local vp = cam.ViewportSize / 2
+		local best, bestDist
+		for _, plr in Players:GetPlayers() do
+			if plr ~= me and not (me.Team ~= nil and plr.Team == me.Team) then
+				local char = plr.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				local root = char and char:FindFirstChild("HumanoidRootPart")
+				if hum and root and hum.Health > 0 then
+					local sp, on = cam:WorldToViewportPoint(root.Position)
+					if on then
+						local d = (Vector2.new(sp.X, sp.Y) - vp).Magnitude
+						if not bestDist or d < bestDist then
+							best, bestDist = root, d
+						end
+					end
+				end
 			end
 		end
+		return best
 	end
-	if #pool == 0 then return nil end
-	return pool[math.random(#pool)]
+
+	-- โดนตัวละครตรง ๆ: เช็คว่าเป็นศัตรู + ยังมีชีวิต
+	local plr = Players:GetPlayerFromCharacter(model)
+	if plr and plr ~= me and not (me.Team ~= nil and plr.Team == me.Team) then
+		local hum = model:FindFirstChildOfClass("Humanoid")
+		local root = model:FindFirstChild("HumanoidRootPart")
+		if hum and root and hum.Health > 0 then return root end
+	end
+	return nil
 end
 
 local function teleport()
 	local myRoot = me.Character and me.Character:FindFirstChild("HumanoidRootPart")
 	if not myRoot then return end
-	local target = pickEnemy()
-	if not target then notify("ไม่มีศัตรู") return end
+	local target = pickTarget()
+	if not target then notify("ไม่พบเป้าหมายบนหน้าจอ") return end
 	local spot = target.CFrame * CFrame.new(0, 0, DIST) -- local +Z = หลังเป้า
 	-- หันหน้าไปทางเดียวกับศัตรู = เพ่งไปที่หลังหัวศัตรู (ตัด pitch ของเป้าออก กันตัวเอียง)
 	local lv = target.CFrame.LookVector
